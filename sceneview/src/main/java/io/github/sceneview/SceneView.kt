@@ -47,6 +47,7 @@ import io.github.sceneview.light.destroy
 import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.Node
 import io.github.sceneview.node.NodeParent
+import io.github.sceneview.node.ViewNode
 import io.github.sceneview.renderable.Renderable
 import io.github.sceneview.scene.build
 import io.github.sceneview.scene.destroy
@@ -341,6 +342,8 @@ open class SceneView @JvmOverloads constructor(
     private var lastTouchEvent: MotionEvent? = null
     private val gestureDetector by lazy { GestureDetector(context, ::pickNode, this) }
 
+    private var interactedViewNode: ViewNode? = null
+
     protected open val cameraGestureDetector: CameraGestureDetector? by lazy {
         CameraGestureDetector(this, CameraGestureListener())
     }
@@ -546,9 +549,26 @@ open class SceneView @JvmOverloads constructor(
             lastTouchEvent = motionEvent
             gestureDetector.onTouchEvent(motionEvent)
             cameraGestureDetector?.onTouchEvent(motionEvent)
+
+            interactedViewNode?.dispatchTouchEvent(motionEvent)
+
+            if (motionEvent.action == MotionEvent.ACTION_UP && interactedViewNode != null) {
+                Log.d(TAG, "ViewNode released")
+                interactedViewNode = null
+            }
+
             return true
         }
         return false
+    }
+
+    override fun onDown(e: NodeMotionEvent) {
+        Log.d(TAG, "Picked node: ${e.node}")
+
+        if (e.node is ViewNode) {
+            Log.d(TAG, "ViewNode picked")
+            interactedViewNode = e.node
+        }
     }
 
     override fun onSingleTapConfirmed(e: NodeMotionEvent) {
@@ -603,7 +623,7 @@ open class SceneView @JvmOverloads constructor(
     fun pickNode(
         x: Int,
         y: Int,
-        onPickingCompleted: (node: ModelNode?, renderable: Renderable) -> Unit
+        onPickingCompleted: (node: Node?, renderable: Renderable) -> Unit
     ) {
         // Invert the y coordinate since its origin is at the bottom
         val invertedY = height - 1 - y
@@ -616,15 +636,30 @@ open class SceneView @JvmOverloads constructor(
             Log.d("Test", "Picking took ${end - start} ms")
 
             val pickedRenderable = pickResult.renderable
+
+            Log.d(TAG, "Picked renderable: $pickedRenderable")
+
             val pickedNode = allChildren
-                .mapNotNull { it as? ModelNode }
-                .firstOrNull { modelNode ->
-                    modelNode.modelInstance?.let { modelInstance ->
-                        modelInstance.entity == pickedRenderable ||
-                                modelInstance.childEntities.contains(
-                                    pickedRenderable
-                                )
-                    } ?: false
+                .firstOrNull { node ->
+                    when (node) {
+                        is ModelNode -> {
+                            node.modelInstance?.let { modelInstance ->
+                                modelInstance.entity == pickedRenderable ||
+                                        modelInstance.childEntities.contains(
+                                            pickedRenderable
+                                        )
+                            } ?: false
+                        }
+                        is ViewNode -> {
+                            node.renderableInstance?.let { renderableInstance ->
+                                renderableInstance.entity == pickedRenderable ||
+                                        renderableInstance.childEntities.contains(
+                                            pickedRenderable
+                                        )
+                            } ?: false
+                        }
+                        else -> false
+                    }
                 }
             onPickingCompleted.invoke(pickedNode, pickedRenderable)
         }
